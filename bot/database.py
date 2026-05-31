@@ -525,15 +525,15 @@ class Database:
         return True
 
     async def get_file(self, unique_id: str) -> Optional[dict]:
-        row = await self._fetchone(
+        return await self._fetchone(
             "SELECT * FROM file_links WHERE file_unique_id=?", (unique_id,)
         )
-        if row:
-            await self._execute(
-                "UPDATE file_links SET download_count=download_count+1 WHERE file_unique_id=?",
-                (unique_id,),
-            )
-        return row
+
+    async def increment_file_downloads(self, unique_id: str) -> None:
+        await self._execute(
+            "UPDATE file_links SET download_count=download_count+1 WHERE file_unique_id=?",
+            (unique_id,),
+        )
 
     async def clean_expired_files(self) -> None:
         await self._execute("DELETE FROM file_links WHERE expires_at < datetime('now')")
@@ -703,6 +703,42 @@ class Database:
             ),
             "active_vips": await _count("SELECT COUNT(*) FROM users WHERE is_vip=1"),
             "total_users": await _count("SELECT COUNT(*) FROM users"),
+        }
+
+    async def get_weekly_stats(self) -> dict:
+        db = await self.connect()
+        days = []
+        for i in range(7):
+            d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            async with db.execute(
+                "SELECT COUNT(*) FROM users WHERE joined_at LIKE ?", (f"{d}%",)
+            ) as c:
+                r = await c.fetchone()
+                days.append({"date": d, "new_users": r[0] if r else 0})
+
+        async def _count(sql, params=()):
+            async with db.execute(sql, params) as c:
+                r = await c.fetchone()
+                return r[0] if r else 0
+
+        top_actions = await self._fetchall(
+            "SELECT action, COUNT(*) as cnt FROM user_logs "
+            "WHERE created_at > datetime('now', '-7 days') "
+            "GROUP BY action ORDER BY cnt DESC LIMIT 5"
+        )
+        return {
+            "daily_breakdown": days,
+            "week_revenue": await _count(
+                "SELECT COALESCE(SUM(amount),0) FROM payments "
+                "WHERE status='confirmed' AND reviewed_at > datetime('now', '-7 days')"
+            ),
+            "week_downloads": await _count(
+                "SELECT COUNT(*) FROM user_logs WHERE action='yt_download' AND created_at > datetime('now', '-7 days')"
+            ),
+            "week_claims": await _count(
+                "SELECT COUNT(*) FROM user_logs WHERE action='claim_config' AND created_at > datetime('now', '-7 days')"
+            ),
+            "top_actions": top_actions,
         }
 
     # ── Logs ──────────────────────────────────────

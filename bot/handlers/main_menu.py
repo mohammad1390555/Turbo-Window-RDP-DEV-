@@ -230,6 +230,8 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     discount = context.user_data.get("discount_code")
     receipt_id = update.message.photo[-1].file_id
     pay_id = await db.create_payment(uid, price, plan, receipt_id, discount)
+    if discount:
+        await db.use_discount(discount)
     await db.add_log(uid, "payment_submit", f"plan={plan} amount={price} id={pay_id}")
     await update.message.reply_text(
         f"Receipt submitted (#{pay_id}). Awaiting admin review.",
@@ -265,7 +267,6 @@ async def handle_discount_code(update: Update, context: ContextTypes.DEFAULT_TYP
     new_price = int(original * (100 - disc["percent"]) / 100)
     context.user_data["vip_price"] = new_price
     context.user_data["discount_code"] = code
-    await db.use_discount(code)
     await update.message.reply_text(
         f"Discount applied! {disc['percent']}% off\n"
         f"Original: {original:,} -> New: *{new_price:,}*\n\n"

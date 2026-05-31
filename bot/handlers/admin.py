@@ -27,6 +27,7 @@ from bot.config import (
     STATE_GIVE_VIP,
     STATE_MANAGE_ADMIN,
     STATE_ADD_DISCOUNT,
+    STATE_ADMIN_WALLET_CHARGE,
 )
 from bot.decorators import guard
 from bot.helpers import safe_edit, sanitize_text, is_valid_tg_id, fmt_time, make_progress_bar
@@ -605,12 +606,9 @@ async def cb_full_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     db = context.bot_data["db"]
     stats = await db.get_stats()
+    weekly = await db.get_weekly_stats()
     conn = await db.connect()
-    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-    async with conn.execute("SELECT COUNT(*) FROM users WHERE joined_at>?", (week_ago,)) as c:
-        week_users = (await c.fetchone())[0]
-    async with conn.execute("SELECT COUNT(*) FROM user_logs WHERE action='yt_download' AND created_at>?", (week_ago,)) as c:
-        week_dl = (await c.fetchone())[0]
+
     async with conn.execute("SELECT id, protocol, remark, usage_count FROM configs ORDER BY usage_count DESC LIMIT 3") as c:
         top_configs = [dict(r) for r in await c.fetchall()]
     async with conn.execute("SELECT telegram_id, username, total_referrals FROM users ORDER BY total_referrals DESC LIMIT 3") as c:
@@ -618,26 +616,45 @@ async def cb_full_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     proxy_stats = await db.get_proxy_stats()
 
+    # Weekly user chart (simple text bar)
+    chart_lines = []
+    for day in reversed(weekly["daily_breakdown"]):
+        bar = make_progress_bar(min(day["new_users"] * 10, 100), 8) if day["new_users"] else "░" * 8
+        chart_lines.append(f"`{day['date'][5:]}` {bar} {day['new_users']}")
+
     text = (
         f"*Full Statistics*\n"
         f"--------------------\n"
-        f"Users: {stats['total_users']:,} | Today: {stats['today_users']:,} | Week: {week_users:,}\n"
+        f"Users: {stats['total_users']:,} | Today: {stats['today_users']:,}\n"
         f"VIP: {stats['total_vips']:,} | Banned: {stats['total_banned']:,}\n\n"
-        f"Downloads: {stats['total_downloads']:,} | Week: {week_dl:,}\n"
-        f"Configs claimed: {stats['total_claims']:,}\n\n"
+        f"*Weekly Overview:*\n"
+        f"Revenue: {weekly['week_revenue']:,}\n"
+        f"Downloads: {weekly['week_downloads']:,}\n"
+        f"Config claims: {weekly['week_claims']:,}\n\n"
+        f"*New users (7 days):*\n"
+    )
+    text += "\n".join(chart_lines)
+    text += (
+        f"\n\n*Lifetime:*\n"
+        f"Downloads: {stats['total_downloads']:,}\n"
         f"Revenue: {stats['total_revenue']:,}\n"
         f"Payments: {stats['total_payments']:,} | Pending: {stats['pending_payments']:,}\n"
-        f"Total wallet balance: {stats['total_wallet_balance']:,}\n\n"
+        f"Wallet pool: {stats['total_wallet_balance']:,}\n"
         f"Proxies: {proxy_stats['alive']} alive / {proxy_stats['total']} total\n\n"
-        f"Top configs:\n"
+        f"*Top configs:*\n"
     )
     for i, c in enumerate(top_configs, 1):
         text += f"{i}. #{c['id']} {c['protocol'].upper()} -- {c['usage_count']} uses\n"
-    text += "\nTop referrers:\n"
+    text += "\n*Top referrers:*\n"
     for i, r in enumerate(top_referrers, 1):
         text += f"{i}. @{r['username'] or r['telegram_id']} -- {r['total_referrals']} referrals\n"
 
-    await safe_edit(q, text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb_admin(q.from_user.id))
+    if weekly["top_actions"]:
+        text += "\n*Top actions (week):*\n"
+        for a in weekly["top_actions"]:
+            text += f"  {a['action']}: {a['cnt']}\n"
+
+    await safe_edit(q, text[:4000], parse_mode=ParseMode.MARKDOWN, reply_markup=kb_admin(q.from_user.id))
 
 
 # ── Backup ───────────────────────────────────────
@@ -736,3 +753,81 @@ async def cmd_reject_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"Payment #{pay_id} rejected.")
     except (IndexError, ValueError):
         await update.message.reply_text("Invalid format. Use /reject_ID")
+
+
+# ── Admin wallet charge ──────────────────────────
+
+@guard(perm="can_manage_payments")
+async def cb_admin_wallet_charge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    await safe_edit(
+        q,
+        "*Charge User Wallet*\n\n"
+        "Send in format:\n"
+        "`user_id amount reason`\n\n"
+        "Example: `123456789 50000 Manual top-up`",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_cancel(),
+    )
+    return STATE_ADMIN_WALLET_CHARGE
+
+
+async def handle_wallet_charge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    db = context.bot_data["db"]
+    if not await db.has_perm(uid, "can_manage_payments"):
+        return ConversationHandler.END
+
+    raw = sanitize_text(update.message.text, 200)
+    parts = raw.split(None, 2)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "Invalid format. Use: `user_id amount reason`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_cancel(),
+        )
+        return STATE_ADMIN_WALLET_CHARGE
+
+    target_id_str, amount_str = parts[0], parts[1]
+    reason = parts[2] if len(parts) > 2 else "Admin charge"
+
+    if not is_valid_tg_id(target_id_str):
+        await update.message.reply_text("Invalid user ID.", reply_markup=kb_cancel())
+        return STATE_ADMIN_WALLET_CHARGE
+
+    try:
+        amount = int(amount_str)
+        if amount <= 0 or amount > 10_000_000:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Invalid amount (1 to 10,000,000).", reply_markup=kb_cancel())
+        return STATE_ADMIN_WALLET_CHARGE
+
+    target_id = int(target_id_str)
+    target = await db.get_user(target_id)
+    if not target:
+        await update.message.reply_text("User not found.", reply_markup=kb_cancel())
+        return STATE_ADMIN_WALLET_CHARGE
+
+    new_balance = await db.add_balance(target_id, amount, f"Admin: {reason}")
+    await db.add_log(uid, "admin_wallet_charge", f"target={target_id} amount={amount} reason={reason}")
+
+    await update.message.reply_text(
+        f"Charged *{amount:,}* to user `{target_id}`\n"
+        f"New balance: *{new_balance:,}*\n"
+        f"Reason: {reason}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_admin(uid),
+    )
+    try:
+        await context.bot.send_message(
+            target_id,
+            f"*{amount:,}* added to your wallet!\n"
+            f"Reason: {reason}\n"
+            f"New balance: *{new_balance:,}*",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception:
+        pass
+    return ConversationHandler.END

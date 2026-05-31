@@ -6,12 +6,13 @@ A feature-rich Telegram bot with VPN config distribution, media downloading, pro
 
 - **VPN Config Distribution** — Free and VIP tiers with cooldown and usage tracking
 - **Media Download** — YouTube, Instagram, TikTok, Twitter video/audio download with queue system
-- **Proxy Service** — Aggregates free HTTP/HTTPS/SOCKS4/SOCKS5 proxies from multiple sources, auto-refreshes, REST API endpoint
+- **Proxy Service** — Aggregates free HTTP/HTTPS/SOCKS4/SOCKS5 proxies from multiple sources, auto-refreshes, REST API endpoint, live proxy checker
+- **Speed Test** — One-click download speed test using Cloudflare and Hetzner endpoints
 - **File to Link** — Upload any file, get a direct download link (7-day expiry)
 - **VIP System** — Silver/Gold/Diamond plans with payment receipts and wallet purchases
 - **Wallet** — Balance management, referral bonuses, VIP purchases
 - **Referral System** — Invite friends, earn wallet credit
-- **Admin Panel** — User management, broadcast, stats, config management, discount codes
+- **Admin Panel** — User management, broadcast, stats, config management, discount codes, wallet charge, weekly analytics dashboard
 - **HTTP Streaming Server** — Direct file downloads via HTTP, proxy list API
 
 ## Project Structure

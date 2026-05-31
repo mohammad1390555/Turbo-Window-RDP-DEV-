@@ -37,6 +37,8 @@ from bot.config import (
     STATE_GIVE_VIP,
     STATE_MANAGE_ADMIN,
     STATE_ADD_DISCOUNT,
+    STATE_CHECKING_PROXY,
+    STATE_ADMIN_WALLET_CHARGE,
 )
 from bot.database import Database
 from bot.keyboards import kb_main
@@ -74,6 +76,8 @@ from bot.handlers.proxy import (
     cb_proxy_stats,
     cb_proxy_refresh,
     cb_proxy_check,
+    handle_proxy_check,
+    cb_speed_test,
     cb_admin_proxy,
     cb_admin_proxy_clean,
     scheduled_proxy_update,
@@ -114,6 +118,8 @@ from bot.handlers.admin import (
     handle_cookie,
     cmd_confirm_payment,
     cmd_reject_payment,
+    cb_admin_wallet_charge,
+    handle_wallet_charge,
 )
 
 # ── Logging ───────────────────────────────────────
@@ -259,7 +265,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_proxy_copy, pattern="^proxy_copy_"))
     app.add_handler(CallbackQueryHandler(cb_proxy_stats, pattern="^proxy_stats$"))
     app.add_handler(CallbackQueryHandler(cb_proxy_refresh, pattern="^proxy_refresh$"))
-    app.add_handler(CallbackQueryHandler(cb_proxy_check, pattern="^proxy_check$"))
+    app.add_handler(CallbackQueryHandler(cb_speed_test, pattern="^speed_test$"))
     app.add_handler(CallbackQueryHandler(cb_admin_proxy, pattern="^admin_proxy$"))
     app.add_handler(CallbackQueryHandler(cb_admin_proxy_clean, pattern="^admin_proxy_clean$"))
 
@@ -281,6 +287,8 @@ def main():
             CallbackQueryHandler(cb_add_admin_prompt, pattern="^add_admin$"),
             CallbackQueryHandler(cb_remove_admin_prompt, pattern="^remove_admin$"),
             CallbackQueryHandler(cb_add_discount_prompt, pattern="^add_discount_code$"),
+            CallbackQueryHandler(cb_proxy_check, pattern="^proxy_check$"),
+            CallbackQueryHandler(cb_admin_wallet_charge, pattern="^admin_wallet_charge$"),
         ],
         states={
             STATE_WAITING_YT_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_yt_url)],
@@ -297,6 +305,8 @@ def main():
             STATE_GIVE_VIP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_give_vip)],
             STATE_MANAGE_ADMIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_action)],
             STATE_ADD_DISCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_discount)],
+            STATE_CHECKING_PROXY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_proxy_check)],
+            STATE_ADMIN_WALLET_CHARGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_wallet_charge)],
         },
         fallbacks=[
             CommandHandler("cancel", cmd_cancel),

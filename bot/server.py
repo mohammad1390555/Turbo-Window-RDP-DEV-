@@ -29,6 +29,7 @@ async def stream_handler(request: web.Request) -> web.Response:
     ):
         return web.Response(status=410, text="Link expired")
 
+    await db.increment_file_downloads(f_uid)
     bot = request.app["bot"]
     try:
         tg_file = await bot.get_file(file_data["file_id"])
@@ -58,7 +59,10 @@ async def proxy_api_handler(request: web.Request) -> web.Response:
     """REST API endpoint for proxy list."""
     db = request.app["db"]
     protocol = request.query.get("protocol")
-    limit = min(int(request.query.get("limit", "50")), 200)
+    try:
+        limit = min(int(request.query.get("limit", "50")), 200)
+    except (ValueError, TypeError):
+        limit = 50
     proxies = await db.get_alive_proxies(protocol=protocol, limit=limit)
     lines = [f"{p['ip']}:{p['port']}" for p in proxies]
     return web.Response(text="\n".join(lines), content_type="text/plain")
@@ -69,6 +73,11 @@ async def start_web_server(bot, db):
     app["bot"] = bot
     app["db"] = db
     app["http_client"] = aiohttp.ClientSession()
+
+    async def close_session(app):
+        await app["http_client"].close()
+
+    app.on_cleanup.append(close_session)
     app.router.add_get("/stream/{f_uid}", stream_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/api/proxies", proxy_api_handler)

@@ -27,9 +27,10 @@ def kb_main(uid: int, role: str = "user") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("Proxy", callback_data="proxy_menu"),
-            InlineKeyboardButton("Referral", callback_data="referral"),
+            InlineKeyboardButton("Speed Test", callback_data="speed_test"),
         ],
         [
+            InlineKeyboardButton("Referral", callback_data="referral"),
             InlineKeyboardButton("Help", callback_data="help"),
         ],
     ]
@@ -65,6 +66,7 @@ def kb_admin(uid: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Discount", callback_data="admin_discount"),
         ],
         [
+            InlineKeyboardButton("Wallet Charge", callback_data="admin_wallet_charge"),
             InlineKeyboardButton("Proxies", callback_data="admin_proxy"),
         ],
     ]

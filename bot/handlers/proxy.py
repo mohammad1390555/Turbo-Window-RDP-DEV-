@@ -14,7 +14,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from bot.config import PROXY_CHECK_TIMEOUT, PROXY_MAX_RESULTS
+from telegram.ext import ConversationHandler
+
+from bot.config import PROXY_CHECK_TIMEOUT, PROXY_MAX_RESULTS, STATE_CHECKING_PROXY
 from bot.decorators import guard
 from bot.helpers import safe_edit
 from bot.keyboards import kb_back_main, kb_proxy_menu
@@ -274,6 +276,59 @@ async def cb_proxy_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=kb_back_main(),
     )
+    return STATE_CHECKING_PROXY
+
+
+async def handle_proxy_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User sent a proxy string to validate."""
+    text = update.message.text.strip()
+    protocol = "http"
+    addr = text
+
+    if "://" in text:
+        protocol, addr = text.split("://", 1)
+        protocol = protocol.lower()
+
+    if ":" not in addr:
+        await update.message.reply_text(
+            "Invalid format. Use `ip:port` or `protocol://ip:port`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_back_main(),
+        )
+        return ConversationHandler.END
+
+    parts = addr.split(":")
+    ip = parts[0].strip()
+    try:
+        port = int(parts[1].strip())
+    except (ValueError, IndexError):
+        await update.message.reply_text(
+            "Invalid port number.",
+            reply_markup=kb_back_main(),
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(f"Checking `{protocol}://{ip}:{port}` ...")
+
+    result = await check_proxy(ip, port, protocol)
+    if result["alive"]:
+        text = (
+            f"*Proxy is ALIVE*\n\n"
+            f"Address: `{ip}:{port}`\n"
+            f"Protocol: {protocol.upper()}\n"
+            f"Response time: *{result['speed_ms']}ms*"
+        )
+    else:
+        text = (
+            f"*Proxy is DEAD*\n\n"
+            f"Address: `{ip}:{port}`\n"
+            f"Protocol: {protocol.upper()}\n"
+            f"Could not connect within {PROXY_CHECK_TIMEOUT}s"
+        )
+    await update.message.reply_text(
+        text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb_proxy_menu()
+    )
+    return ConversationHandler.END
 
 
 # Admin proxy management
@@ -310,6 +365,36 @@ async def cb_admin_proxy_clean(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Back", callback_data="admin_proxy")],
         ]),
     )
+
+
+@guard()
+async def cb_speed_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Run a quick download speed test."""
+    q = update.callback_query
+    await q.answer()
+    await safe_edit(q, "Running speed test...\nPlease wait 5-10 seconds.", reply_markup=None)
+
+    test_urls = [
+        ("Cloudflare", "https://speed.cloudflare.com/__down?bytes=5000000"),
+        ("Hetzner", "https://speed.hetzner.de/1MB.bin"),
+    ]
+    results = []
+    async with aiohttp.ClientSession() as session:
+        for name, url in test_urls:
+            try:
+                start = time.monotonic()
+                total = 0
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    async for chunk in resp.content.iter_chunked(65536):
+                        total += len(chunk)
+                elapsed = time.monotonic() - start
+                speed_mbps = (total * 8) / (elapsed * 1_000_000)
+                results.append(f"{name}: *{speed_mbps:.1f} Mbps* ({total / 1024:.0f} KB in {elapsed:.1f}s)")
+            except Exception:
+                results.append(f"{name}: Failed")
+
+    text = "*Speed Test Results*\n--------------------\n\n" + "\n".join(results)
+    await safe_edit(q, text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb_back_main())
 
 
 async def scheduled_proxy_update(context: ContextTypes.DEFAULT_TYPE):

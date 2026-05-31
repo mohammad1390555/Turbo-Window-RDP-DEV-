@@ -34,7 +34,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"*Referral success!*\n\n"
                 f"*{user.full_name or user.username or 'New user'}* joined via your link!\n"
                 f"*{REFERRAL_BONUS:,}* added to your wallet\n"
-                f"Balance: *{(referrer['balance'] + REFERRAL_BONUS):,}*",
+                f"Balance: *{referrer['balance']:,}*",
                 parse_mode=ParseMode.MARKDOWN,
             )
         except Exception:
@@ -49,6 +49,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ):
                 await update.message.reply_text("This link has expired.")
                 return
+            await db.increment_file_downloads(file_uid)
             try:
                 send_map = {
                     "document": context.bot.send_document,
