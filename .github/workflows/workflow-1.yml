@@ -45,27 +45,56 @@ jobs:
       RDP_PASS: Bullet@12345
 
     steps:
-      - name: Decide runtime
+      - name: Cache Tailscale MSI
+        uses: actions/cache@v4
+        id: ts-cache
+        with:
+          path: ${{ runner.temp }}\tailscale.msi
+          key: tailscale-1.82.0-amd64
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-win-pyautogui-pynput-pillow
+
+      - name: Install Tailscale + Python (parallel)
         run: |
+          # Start pip install in background
+          $pipOut = "$env:TEMP\pip-out.txt"
+          $pipErr = "$env:TEMP\pip-err.txt"
+          $pipProc = Start-Process python -ArgumentList "-m","pip","install","pyautogui","pynput","pillow" `
+            -NoNewWindow -PassThru -RedirectStandardOutput $pipOut -RedirectStandardError $pipErr
+
+          # Determine runtime
           function Yes($v){ "$v" -match '^(?i:true|1|yes|on)$' }
-          $rt=if(Yes("${{ inputs.quick_test }}")){5}else{[int]"${{ inputs.runtime_minutes }}"}
+          $rt = if(Yes("${{ inputs.quick_test }}")){5}else{[int]"${{ inputs.runtime_minutes }}"}
           if($rt -gt 360){$rt=355}
-          "RUNTIME_MINUTES=$rt"|Out-File -Append $env:GITHUB_ENV
+          "RUNTIME_MINUTES=$rt" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Runtime set to $rt minutes"
 
-      - name: Install + Configure Tailscale
-        run: |
-          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          # Install + connect Tailscale
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           if(-not(Test-Path $ts)){
-            $url="https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-            $dst="$env:TEMP\tailscale.msi"
-            Invoke-WebRequest $url -OutFile $dst
+            $dst = "${{ runner.temp }}\tailscale.msi"
+            if(-not(Test-Path $dst)){
+              Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile $dst
+            }
             Start-Process msiexec.exe -ArgumentList "/i","`"$dst`"","/quiet","/norestart" -Wait
           }
           & $ts up --authkey "${{ inputs.ts_authkey }}" --hostname "bullet1" --accept-dns=true
-          $ip=& $ts ip -4 |Select-Object -First 1
-          "TAILSCALE_IP=$ip"|Out-File -Append $env:GITHUB_ENV
+          $ip = & $ts ip -4 | Select-Object -First 1
+          "TAILSCALE_IP=$ip" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Tailscale IPv4: $ip"
+
+          # Wait for pip install
+          $pipProc | Wait-Process
+          if($pipProc.ExitCode -ne 0){
+            Get-Content $pipErr -EA SilentlyContinue
+            throw "pip install failed with exit code $($pipProc.ExitCode)"
+          }
+          Write-Host "Python libs installed:"
+          Get-Content $pipOut -EA SilentlyContinue
 
       - name: Enable RDP
         run: |
@@ -79,11 +108,6 @@ jobs:
           Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" fDenyTSConnections 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Write-Host "RDP ready: $u / $p @ $env:TAILSCALE_IP"
-
-      - name: Install Python libs
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --force-reinstall pyautogui pynput pillow
 
       - name: Keep alive
         run: |
@@ -110,4 +134,4 @@ jobs:
           $hdr=@{Authorization="Bearer $env:GH_TOKEN";Accept="application/vnd.github+json"}
           $body=@{ref="${{ github.ref_name }}";inputs=$payload}|ConvertTo-Json -Depth 20
           Invoke-WebRequest -Method POST -Uri $url -Headers $hdr -Body $body|Out-Null
-          Write-Host "➡️  Workflow 2 triggered. Cycles left: $next"
+          Write-Host "Workflow 2 triggered. Cycles left: $next"
