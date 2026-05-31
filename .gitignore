@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+config.json
+bot.db
+*.sqlite
+uploads/
+logs/
+backups/
+temp/
+.yt-dlp/
