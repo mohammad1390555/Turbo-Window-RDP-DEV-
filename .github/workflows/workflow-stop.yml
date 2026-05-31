@@ -37,26 +37,25 @@ jobs:
                 $count++
               }
             }
-            Write-Host "🧹 Removed $count bullet devices from Tailscale."
-          }catch{Write-Host "⚠️ Cleanup failed: $($_.Exception.Message)"}
+            Write-Host "Removed $count bullet devices from Tailscale."
+          }catch{Write-Host "Cleanup failed: $($_.Exception.Message)"}
 
       - name: Decide next step
         id: next
         run: |
           $left=[int]"${{ inputs.cycles_left }}"
           if($left -le 0){
-            Write-Host "✅ 5 cycles completed. Stopping permanently."
+            Write-Host "All 5 cycles completed. Stopping permanently."
             "RESTART=0"|Out-File -Append $env:GITHUB_ENV
           }else{
-            Write-Host "⏳ Waiting 20 min before restarting Workflow 1. Cycles left: $left"
+            Write-Host "Waiting 20 min before restarting Workflow 1. Cycles left: $left"
             "RESTART=1"|Out-File -Append $env:GITHUB_ENV
           }
 
       - name: Wait 20 minutes (if restarting)
         if: env.RESTART == '1'
         run: |
-          $end=(Get-Date).AddMinutes(20)
-          while((Get-Date) -lt $end){Write-Host ("🕒 Cooling down "+(Get-Date));Start-Sleep 60}
+          for($i=1;$i -le 4;$i++){Write-Host "Cooling down ($i/4)";Start-Sleep 300}
 
       - name: Restart Workflow 1 (if cycles remain)
         if: env.RESTART == '1'
@@ -64,7 +63,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $next=[int]"${{ inputs.cycles_left }}"-1
-          if($next -le 0){Write-Host "✅ Finished all cycles.";exit 0}
+          if($next -le 0){Write-Host "Finished all cycles.";exit 0}
           $payload=@{
             ts_tailnet="${{ inputs.ts_tailnet }}"
             ts_api_key="${{ inputs.ts_api_key }}"
@@ -79,4 +78,4 @@ jobs:
           $hdr=@{Authorization="Bearer $env:GH_TOKEN";Accept="application/vnd.github+json"}
           $body=@{ref="${{ github.ref_name }}";inputs=$payload}|ConvertTo-Json -Depth 20
           Invoke-WebRequest -Method POST -Uri $url -Headers $hdr -Body $body|Out-Null
-          Write-Host "🚀 Workflow 1 restarted (cycles left: $next)"
+          Write-Host "Workflow 1 restarted (cycles left: $next)"
