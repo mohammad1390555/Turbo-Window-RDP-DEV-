@@ -3,9 +3,6 @@ name: RDP + Tailscale (Workflow 2)
 on:
   workflow_dispatch:
     inputs:
-      ts_tailnet:      { description: "Tailscale tailnet", required: true }
-      ts_api_key:      { description: "Tailscale API key", required: true }
-      ts_authkey:      { description: "Tailscale Auth key", required: true }
       quick_test:      { description: "Run 5-min test", type: boolean, default: false }
       runtime_minutes: { description: "Runtime", required: false, default: "355" }
       do_purge:        { description: "Purge bullet devices", required: false, default: "true" }
@@ -25,11 +22,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 370
     env:
-      RDP_USER: Bullettemporary
-      RDP_PASS: Bullet@12345
+      RDP_USER: ${{ secrets.RDP_USER }}
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
       - name: Setup Tailscale + RDP
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
           $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
           if(-not(Test-Path $ts)){
@@ -38,7 +37,7 @@ jobs:
             Invoke-WebRequest $url -OutFile $dst
             Start-Process msiexec.exe -ArgumentList "/i","`"$dst`"","/quiet","/norestart" -Wait
           }
-          & $ts up --authkey "${{ inputs.ts_authkey }}" --hostname "bullet2" --accept-dns=true
+          & $ts up --authkey $env:TS_AUTHKEY --hostname "bullet2" --accept-dns=true
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
       - name: Install Python libs
@@ -47,8 +46,10 @@ jobs:
           python -m pip install --force-reinstall pyautogui pynput pillow
 
       - name: Keep alive
+        env:
+          INPUT_RUNTIME_MINUTES: ${{ inputs.runtime_minutes }}
         run: |
-          $rt=[int]"${{ inputs.runtime_minutes }}"
+          $rt=[int]$env:INPUT_RUNTIME_MINUTES
           $end=(Get-Date).AddMinutes($rt)
           while((Get-Date) -lt $end){Write-Host ("Workflow2 heartbeat "+(Get-Date));Start-Sleep 60}
 
@@ -56,19 +57,21 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_QUICK_TEST: ${{ inputs.quick_test }}
+          INPUT_RUNTIME_MINUTES: ${{ inputs.runtime_minutes }}
+          INPUT_DO_PURGE: ${{ inputs.do_purge }}
+          INPUT_RDP_COUNT: ${{ inputs.rdp_count }}
+          INPUT_CYCLES_LEFT: ${{ inputs.cycles_left }}
         run: |
           $payload=@{
-            ts_tailnet="${{ inputs.ts_tailnet }}"
-            ts_api_key="${{ inputs.ts_api_key }}"
-            ts_authkey="${{ inputs.ts_authkey }}"
-            quick_test="${{ inputs.quick_test }}"
-            runtime_minutes="${{ inputs.runtime_minutes }}"
-            do_purge="${{ inputs.do_purge }}"
-            rdp_count="${{ inputs.rdp_count }}"
-            cycles_left="${{ inputs.cycles_left }}"
+            quick_test=$env:INPUT_QUICK_TEST
+            runtime_minutes=$env:INPUT_RUNTIME_MINUTES
+            do_purge=$env:INPUT_DO_PURGE
+            rdp_count=$env:INPUT_RDP_COUNT
+            cycles_left=$env:INPUT_CYCLES_LEFT
           }
           $url="https://api.github.com/repos/${{ github.repository }}/actions/workflows/workflow-stop.yml/dispatches"
           $hdr=@{Authorization="Bearer $env:GH_TOKEN";Accept="application/vnd.github+json"}
           $body=@{ref="${{ github.ref_name }}";inputs=$payload}|ConvertTo-Json -Depth 20
           Invoke-WebRequest -Method POST -Uri $url -Headers $hdr -Body $body|Out-Null
-          Write-Host "🛑 STOP workflow triggered (cycles left: ${{ inputs.cycles_left }})"
+          Write-Host "STOP workflow triggered (cycles left: $env:INPUT_CYCLES_LEFT)"
